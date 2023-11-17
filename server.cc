@@ -79,8 +79,8 @@ void setup() {
 void loop() {
     // put your main code here, to run repeatedly:
 
-    uint8_t sensorValue = analogRead(13);
-    Serial.println("Read Value: ");
+    uint64_t sensorValue = analogRead(13);
+    Serial.println("Sensor Read Value: ");
     Serial.println(sensorValue);
     
     String valToSend = String(sensorValue);
@@ -91,5 +91,5 @@ void loop() {
     pChar->notify();
 
 
-    delay(5);
+    delay(100);
 }
