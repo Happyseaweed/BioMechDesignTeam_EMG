@@ -10,10 +10,11 @@ from time import sleep
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
+import matplotlib.colors as mccolor
 
 # Constants
 # TODO: probably make this in a class so we can do OOP
-
+print("Hello World")
 recordingStarted = False
 recordedData = []
 
@@ -53,7 +54,7 @@ def read_serial():
 
 
 def update_label(data):
-    lbl.config(text=data)
+    root.after(0, lbl.config, {'text': data})
 
 def toggleRecord():
     global recordingStarted
@@ -69,13 +70,43 @@ def toggleRecord():
         print(saveData.shape)
         if not os.path.exists("saves/"):
             os.makedirs("saves")
-        np.savetxt(f"saves/{datetime.datetime.now()}_Trail_0.csv", saveData, fmt="%d")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        np.savetxt(f"saves/{timestamp}_Trail_0.csv", saveData, fmt="%d")
         recordedData = []
     recordingStarted = not recordingStarted
 
 root = tk.Tk()
-root.geometry("600x400")
+root.geometry("600x800")
 root.title("Live Serial Data")
+
+fig, ax = plt.subplots()
+
+canvas = FigureCanvasTkAgg(fig, master=root)
+canvas.get_tk_widget().grid(row=3, column=0, columnspan=3, pady=20)
+
+def update_plot(data):
+    ax.clear()
+    ax.plot(data, color='blue', label = 'Data Values')
+    recent_data = data[-100:]
+    avg = np.mean(recent_data)
+    ax.scatter(len(data)-1, avg, color='red', label='Point Average')
+    ax.annotate(f'{avg:.2f}', xy=(len(data)-1, avg), xytext=(len(data)-1, avg+0.5),
+                arrowprops=dict(facecolor='red', shrink=0.005),
+                bbox=dict(boxstyle="round,pad=0.3", edgecolor='red', facecolor='white'))
+    ax.legend(loc='upper right')
+    canvas.draw()
+
+def animate(i):
+    if recordedData:
+        update_plot(recordedData)
+
+def close():
+    print("closing")
+    root.quit()
+    root.destroy()
+
+
+ani = animation.FuncAnimation(fig, animate, interval=1000)
 
 lbl = tk.Label(root, text="Waiting for data...", font=("Helvetica", 16))
 lbl.grid(row=0, column=0, columnspan=3, pady=20)
@@ -89,6 +120,9 @@ rec_btn.grid(row=2, column=1, padx=20, pady=10)
 
 delayTimeEntry.grid(row=1,column=1)
 rec_btn.grid(row=2,column=1)
+
+close_btn = tk.Button(root, text = 'Close Program', command = close)
+close_btn.grid(row=10, column=1, padx=50, pady=10)
 
 # Make sure everything is centered in the window
 root.grid_columnconfigure(0, weight=1)
