@@ -16,12 +16,15 @@ import matplotlib.colors as mccolor
 # TODO: probably make this in a class so we can do OOP
 print("Hello World")
 recordingStarted = False
+recordingInitial = False
 recordedData = []
+
 
 def read_serial():
     print("Test")
     global recordingStarted
     global recordedData
+    global recordingInitial
     try:
         with serial.Serial('/dev/cu.SLAB_USBtoUART', 9600, timeout=2) as ser:
             while ser.is_open:
@@ -30,37 +33,104 @@ def read_serial():
                 update_label(decoded)
                 # sleep(0.0050)
                 if recordingStarted:
-                    decoded = decoded[:-2]
-                    recordedData.append(decoded) 
+                    if recordingInitial:
+                        update_cd("Begin Recording in 3")
+                        time.sleep(1)
+                        update_cd("Begin Recording in 2")
+                        time.sleep(1)
+                        update_cd("Begin Recording in 1")
+                        time.sleep(1)
+                        recordingInitial = not recordingInitial
+                    x = 5
+                    time_begin = time.time()
+                    while time.time() - time.begin < 5:
+                        if not recordingStarted:
+                            break
+                        start_time = time.time()
+                        update_cd("Relax Arm. Contract in " + str(x))
+                        x-=1
+                        while time.time()-start_time <1:
+                            decoded = decoded[:-2]
+                            time.sleep(0.01)
+                            update_label(decoded)
+                            if recordingStarted:
+                                recordedData.append([decoded,0])
+                    x = 5
+                    time_begin = time.time()
+                    while time.time()-time_begin < 5:
+                        if not recordingStarted:
+                            break
+                        start_time = time.time()
+                        update_cd("Contract Arm. Relax in " + str(x))
+                        x-=1
+                        while time.time()-start_time < 1:
+                            decoded = decoded[:-2]
+                            time.sleep(0.01)
+                            update_label(decoded)
+                            if recordingStarted:
+                                recordedData.append([decoded,1])
+                if not recordingStarted:
+                    update_cd("Recording Stopped")
+
     # When you don't have esp32 connected but just work on the GUI itself
     except Exception as e:
         print("Currently at offline mode, generating random data")
         # Send fake data with random pockets of EMG
         while True:
-            start_time = time.time()
-            while time.time()-start_time < 5:
-                decoded = random.randint(0, 100)
-                time.sleep(0.01)
-                update_label(decoded)
-                if recordingStarted:
-                    recordedData.append(decoded)
-            start_time = time.time()
-            while time.time()-start_time < 2.5:
-                decoded = random.randint(1000, 2000)
-                time.sleep(0.01)
-                update_label(decoded)
-                if recordingStarted:
-                    recordedData.append(decoded)
+            if recordingStarted:
+                if recordingInitial:
+                    update_cd("Begin Recording in 3")
+                    time.sleep(1)
+                    update_cd("Begin Recording in 2")
+                    time.sleep(1)
+                    update_cd("Begin Recording in 1")
+                    time.sleep(1)
+                    recordingInitial = not recordingInitial
+                x = 5
+                time_begin = time.time()
+                while time.time()-time_begin < 5:
+                    if not recordingStarted:
+                        break
+                    start_time = time.time()
+                    update_cd("Relax Arm. Contract in " + str(x))
+                    x-=1
+                    while time.time()-start_time < 1:
+                        decoded = random.randint(0, 100)
+                        time.sleep(0.01)
+                        update_label(decoded)
+                        if recordingStarted:
+                            recordedData.append([decoded,0])
+                x = 5
+                time_begin = time.time()
+                while time.time()-time_begin < 5:
+                    if not recordingStarted:
+                        break
+                    start_time = time.time()
+                    update_cd("Contract Arm. Relax in " + str(x))
+                    x-=1
+                    while time.time()-start_time < 1:
+                        decoded = random.randint(1000, 2000)
+                        time.sleep(0.01)
+                        update_label(decoded)
+                        if recordingStarted:
+                            recordedData.append([decoded,1])
+            if not recordingStarted:
+                update_cd("Recording Stopped")
 
 
 def update_label(data):
     root.after(0, lbl.config, {'text': data})
 
+def update_cd(data):
+    root.after(0, cd.config, {'text': data})
+
 def toggleRecord():
     global recordingStarted
     global recordedData
+    global recordingInitial
     if (not recordingStarted): 
         rec_btn.config(text="Stop")
+        recordingInitial = True
         print("RECORDING [STARTED]\n")
     else: 
         rec_btn.config(text="Start")
@@ -71,18 +141,18 @@ def toggleRecord():
         if not os.path.exists("saves/"):
             os.makedirs("saves")
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        np.savetxt(f"saves/{timestamp}_Trail_0.csv", saveData, fmt="%d")
+        np.savetxt(f"saves/{timestamp}_Trail_0.csv", saveData, fmt="%d", delimiter ='; ')
         recordedData = []
     recordingStarted = not recordingStarted
 
 root = tk.Tk()
-root.geometry("600x800")
+root.geometry("600x1000")
 root.title("Live Serial Data")
 
 fig, ax = plt.subplots()
-
+#graph row =4
 canvas = FigureCanvasTkAgg(fig, master=root)
-canvas.get_tk_widget().grid(row=3, column=0, columnspan=3, pady=20)
+canvas.get_tk_widget().grid(row=4, column=0, columnspan=3, pady=20)
 
 def update_plot(data):
     ax.clear()
@@ -97,8 +167,8 @@ def update_plot(data):
     canvas.draw()
 
 def animate(i):
-    if recordedData:
-        update_plot(recordedData)
+    if recordedData and recordingStarted:
+        update_plot([row[0] for row in recordedData])
 
 def close():
     print("closing")
@@ -111,18 +181,21 @@ ani = animation.FuncAnimation(fig, animate, interval=1000)
 lbl = tk.Label(root, text="Waiting for data...", font=("Helvetica", 16))
 lbl.grid(row=0, column=0, columnspan=3, pady=20)
 
+cd = tk.Label(root, text="Recording stopped", font=("Helvetica", 16))
+cd.grid(row=1, column=0, columnspan=3, pady=20)
+
 delayTime = tk.IntVar()
 delayTimeEntry = tk.Entry(root, textvariable = delayTime, font=("Helvetica", 16))
-delayTimeEntry.grid(row=1, column=1, padx=20, pady=10)
+delayTimeEntry.grid(row=2, column=1, padx=20, pady=10)
 
 rec_btn = tk.Button(root, text = 'Start' , command = toggleRecord)
-rec_btn.grid(row=2, column=1, padx=20, pady=10)
+rec_btn.grid(row=3, column=1, padx=20, pady=10)
 
-delayTimeEntry.grid(row=1,column=1)
-rec_btn.grid(row=2,column=1)
+delayTimeEntry.grid(row=2,column=1)
+rec_btn.grid(row=3,column=1)
 
 close_btn = tk.Button(root, text = 'Close Program', command = close)
-close_btn.grid(row=10, column=1, padx=50, pady=10)
+close_btn.grid(row=11, column=1, padx=50, pady=10)
 
 # Make sure everything is centered in the window
 root.grid_columnconfigure(0, weight=1)
