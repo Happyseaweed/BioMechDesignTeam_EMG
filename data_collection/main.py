@@ -7,6 +7,8 @@ import os
 import random
 import time
 from time import sleep
+import matplotlib
+matplotlib.use('TkAgg') 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
@@ -43,7 +45,7 @@ def read_serial():
                         recordingInitial = not recordingInitial
                     x = 5
                     time_begin = time.time()
-                    while time.time() - time.begin < 5:
+                    while time.time() - time_begin < 5:
                         if not recordingStarted:
                             break
                         start_time = time.time()
@@ -119,10 +121,10 @@ def read_serial():
 
 
 def update_label(data):
-    root.after(0, lbl.config, {'text': data})
+    root.after(0, lambda: lbl.config(text=str(data)))
 
 def update_cd(data):
-    root.after(0, cd.config, {'text': data})
+    root.after(0, lambda: cd.config(text=str(data)))
 
 def toggleRecord():
     global recordingStarted
