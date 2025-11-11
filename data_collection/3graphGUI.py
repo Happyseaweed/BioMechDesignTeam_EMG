@@ -3,7 +3,9 @@ import time
 import serial
 import csv
 import random
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5.QtWidgets import QPushButton, QLineEdit, QGridLayout
+
 import pyqtgraph as pg
 from PyQt5.QtCore import QThread, pyqtSignal
 import os.path
@@ -52,7 +54,12 @@ class DataGenerator(QThread):
         #! PATH currently for MacOS Silicon
         #! PATH might need to be changed for Windows machines.
 
-        ser = serial.Serial('/dev/cu.SLAB_USBtoUART', 9600, timeout=1)
+        try:
+            ser = serial.Serial('/dev/cu.SLAB_USBtoUART', 9600, timeout=1)
+        except Exception as e:
+            print(f"Serial port not available: {e}. Using dummy data.")
+            self.generate_dummy_data()
+            return
         while self._running:
             if ser.in_waiting:
                 line = ser.readline().decode().strip()
@@ -70,19 +77,56 @@ class DataGenerator(QThread):
         self.wait()
 
 class LiveGraph(QtWidgets.QMainWindow):
+    update_instruction = pyqtSignal(str)  # Signal to update instruction label from thread
+    update_button = pyqtSignal(str)  # Signal to update button text
+    show_overlay = pyqtSignal()  # Signal to show overlay
+    hide_overlay = pyqtSignal()  # Signal to hide overlay
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EMG Data")
         self.setGeometry(100, 100, 1000, 700)
         
         central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QtWidgets.QVBoxLayout(central_widget)
+        main_layout = QtWidgets.QHBoxLayout(central_widget)
+        
+        # Overlay widget for countdown
+        self.overlay_widget = QtWidgets.QWidget(self)
+        #self.overlay_widget.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        self.overlay_widget.setStyleSheet("background-color: rgba(255, 255, 255, 0.7);")
+        overlay_layout = QtWidgets.QVBoxLayout(self.overlay_widget)
+        overlay_layout.setAlignment(QtCore.Qt.AlignCenter)
+        
+        self.overlay_label = QtWidgets.QLabel()
+        self.overlay_label.setStyleSheet("font-size: 72px; color: red; font-weight: bold;")
+        self.overlay_label.setAlignment(QtCore.Qt.AlignCenter)
+        overlay_layout.addWidget(self.overlay_label)
+        
+        self.overlay_button = QtWidgets.QPushButton("Stop Muscles")
+        self.overlay_button.setStyleSheet("""
+            font-size: 24px;
+            padding: 10px;
+            background-color: gray;
+            color: white;
+            border-radius: 10px;
+            border: 2px solid gray;
+        """)
+
+
+        self.overlay_button.clicked.connect(self.start_muscles)
+        overlay_layout.addWidget(self.overlay_button, alignment=QtCore.Qt.AlignCenter)
+        
+        self.overlay_widget.hide()
+        self.overlay_widget.setGeometry(0, 0, 1000, 700)  # Initial size
+        
+        # Left side: All existing content
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+        main_layout.addWidget(left_widget)
         
         # Control Panel
         control_panel = QtWidgets.QWidget()
         control_layout = QtWidgets.QHBoxLayout(control_panel)
-        main_layout.addWidget(control_panel)
+        left_layout.addWidget(control_panel)
         
         # Data Source Controls
         self.toggle_source_btn = QtWidgets.QPushButton("Switch to Serial Data")
@@ -111,7 +155,7 @@ class LiveGraph(QtWidgets.QMainWindow):
         
         # Graph Layout
         graphs_layout = QtWidgets.QHBoxLayout()
-        main_layout.addLayout(graphs_layout)
+        left_layout.addLayout(graphs_layout)
         
         self.plot_widgets = []
         for i, color in enumerate(['b', 'r', 'g']):
@@ -133,8 +177,68 @@ class LiveGraph(QtWidgets.QMainWindow):
         self.history_plot.setYRange(-10, 3000)
         self.history_plot.plotItem.showGrid(True, True, 0.2)
         self.history_plot.setMinimumHeight(250)
-        main_layout.addWidget(self.history_plot)
+        left_layout.addWidget(self.history_plot)
         self.history_plot_segments = 0
+        
+        # Right side: Command Panel
+        self.command_panel = QtWidgets.QWidget()
+        self.command_panel.setFixedWidth(200)
+        command_layout = QtWidgets.QVBoxLayout(self.command_panel)
+        main_layout.addWidget(self.command_panel)
+        
+        # Form part
+        form_layout = QtWidgets.QFormLayout()
+
+        self.title = QtWidgets.QLabel("Command Panel")
+        self.title.setStyleSheet("font-weight: bold; font-size: 18px;")
+        command_layout.addWidget(self.title)
+
+         # 3D Model Scene (placeholder)
+        self.scene_label = QtWidgets.QLabel("Placeholder")
+        self.scene_label.setFixedHeight(200)
+        self.scene_label.setStyleSheet("background-color: lightgray; border: 1px solid black;")
+        command_layout.addWidget(self.scene_label)
+
+        command_layout.addStretch()
+        command_layout.addLayout(form_layout)
+        
+        self.mode_dropdown = QtWidgets.QComboBox()
+        self.mode_dropdown.addItems(["Finger Extension/Flexion", "Supination/Pronation", "Placeholder"])
+        form_layout.addRow(self.mode_dropdown)
+
+        duration_label = QtWidgets.QLabel("Number of Cycles:")
+        self.duration_input = QtWidgets.QLineEdit()
+        self.duration_input.setValidator(QtGui.QIntValidator(1, 99999))
+        self.duration_input.setText("2")
+        form_layout.addRow(duration_label, self.duration_input)
+
+        duration_label = QtWidgets.QLabel("Cycle Duration:")
+        self.cycle_duration_input = QtWidgets.QLineEdit()
+        self.cycle_duration_input.setValidator(QtGui.QIntValidator(1, 99999))
+        self.cycle_duration_input.setText("5")
+        form_layout.addRow(duration_label, self.cycle_duration_input)
+
+        sets_label = QtWidgets.QLabel("Number of Sets:")
+        self.sets_input = QtWidgets.QLineEdit()
+        self.sets_input.setValidator(QtGui.QIntValidator(1, 99999))
+        self.sets_input.setText("1")
+        form_layout.addRow(sets_label, self.sets_input)
+
+        rest_label = QtWidgets.QLabel("Set Rest (seconds):")
+        self.rest_input = QtWidgets.QLineEdit()
+        self.rest_input.setValidator(QtGui.QIntValidator(0, 99999))
+        self.rest_input.setText("10")
+        form_layout.addRow(rest_label, self.rest_input)
+
+        duration_button = QPushButton("Start Muscles")
+        duration_button.clicked.connect(self.start_muscles)
+        command_layout.addWidget(duration_button)
+        
+
+        self.update_button.connect(duration_button.setText)
+        self.update_button.connect(self.overlay_button.setText)
+        self.show_overlay.connect(self.overlay_widget.show)
+        self.hide_overlay.connect(self.overlay_widget.hide)
         
         self.data = [[0]*200 for _ in range(3)]
         self.data_generator = DataGenerator(dummy_mode=True)
@@ -143,6 +247,99 @@ class LiveGraph(QtWidgets.QMainWindow):
         
         self.frame_count = 0
         self.cur_time = time.time()
+        self.countdown_running = False
+
+    def resizeEvent(self, event):
+        self.overlay_widget.setGeometry(0, 0, self.width(), self.height())
+        super().resizeEvent(event)
+
+    def start_muscles(self):
+        if self.countdown_running:
+            # Stop the countdown
+            self.countdown_running = False
+            self.update_button.emit("Start Muscles")
+            self.update_instruction.emit("Instructions:\n- Raise your hand\n- Lower your hand")
+            try:
+                self.hide_overlay.emit()
+            except RuntimeError:
+                pass
+        else:
+            # Start the countdown
+            mode = self.mode_dropdown.currentText()
+            try:
+                num_cycles = int(self.duration_input.text())
+                cycle_duration = int(self.cycle_duration_input.text())
+                num_sets = int(self.sets_input.text())
+                rest_time = int(self.rest_input.text())
+            except ValueError:
+                self.update_instruction.emit("Invalid values")
+                return
+            
+            self.countdown_running = True
+            self.update_button.emit("Stop Muscles")
+            
+            # Start the countdown in a separate thread
+            import threading
+            threading.Thread(target=self.run_countdown, args=(mode, cycle_duration, num_cycles, num_sets, rest_time), daemon=True).start()
+
+    def run_countdown(self, mode, cycle_duration, num_cycles, num_sets, rest_time):
+        try:
+            self.show_overlay.emit()
+        except RuntimeError:
+            return
+        
+        # Define texts based on mode
+        if mode == "Finger Extension/Flexion":
+            open_text = "Open palm"
+            close_text = "Close palm"
+        elif mode == "Supination/Pronation":
+            open_text = "Supinate"
+            close_text = "Pronate"
+        else:
+            open_text = "Action 1"
+            close_text = "Action 2"
+        
+        for set_num in range(num_sets):
+            for cycle in range(num_cycles):
+                if not self.countdown_running:
+                    break
+
+                for i in range(cycle_duration, 0, -1):
+                    if not self.countdown_running:
+                        break
+                    try:
+                        self.overlay_label.setText(f"{open_text} {i}")
+                    except RuntimeError:
+                        return
+                    time.sleep(1)
+                if not self.countdown_running:
+                    break
+
+                for i in range(cycle_duration, 0, -1):
+                    if not self.countdown_running:
+                        break
+                    try:
+                        self.overlay_label.setText(f"{close_text} {i}")
+                    except RuntimeError:
+                        return
+                    time.sleep(1)
+            if set_num < num_sets - 1 and self.countdown_running:
+                # Rest phase between sets
+                for i in range(rest_time, 0, -1):
+                    if not self.countdown_running:
+                        break
+                    try:
+                        self.overlay_label.setText(f"Rest {i}")
+                    except RuntimeError:
+                        return
+                    time.sleep(1)
+        try:
+            self.hide_overlay.emit()
+            self.update_instruction.emit("Instructions:\n- Raise your hand\n- Lower your hand")
+            self.update_button.emit("Start Muscles")
+        except RuntimeError:
+            pass
+        self.countdown_running = False
 
     def toggle_data_source(self):
         was_recording = self.data_generator.recordingStarted
