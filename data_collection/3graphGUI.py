@@ -3,9 +3,10 @@ import time
 import serial
 import csv
 import random
+import statistics
 from PyQt5 import QtWidgets, QtCore
 import pyqtgraph as pg
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 import os.path
 
 
@@ -16,9 +17,18 @@ class DataGenerator(QThread):
     def __init__(self, dummy_mode=True):
         super().__init__()
         self.recordingStarted = False
+        # self.calibratingStarted_rest = False
+        # self.calibratingStarted_motion = False
         self.recordedData = []
         self.dummy_mode = dummy_mode
         self._running = True
+        self.restData = []
+        self.motionData = []
+        self.record_rest = False
+        self.record_motion = False
+        self.calibrated = False
+        self.rest_threshold = [0, 0, 0]
+        self.motion_threshold = [0, 0, 0]
 
     def run(self):
         if self.dummy_mode:
@@ -36,6 +46,10 @@ class DataGenerator(QThread):
                 self.new_data.emit(v1, v2, v3)
                 if self.recordingStarted:
                     self.recordedData.append([v1, v2, v3])
+                if self.record_rest:
+                    self.restData.append([v1, v2, v3])
+                if self.record_motion:
+                    self.motionData.append([v1, v2, v3])
                 time.sleep(0.01)
             
             start_time = time.time()
@@ -46,6 +60,10 @@ class DataGenerator(QThread):
                 self.new_data.emit(v1, v2, v3)
                 if self.recordingStarted:
                     self.recordedData.append([v1, v2, v3])
+                if self.record_rest:
+                    self.restData.append([v1, v2, v3])
+                if self.record_motion:
+                    self.motionData.append([v1, v2, v3])
                 time.sleep(0.01)
 
     def read_serial_data(self):
@@ -55,13 +73,26 @@ class DataGenerator(QThread):
         ser = serial.Serial('/dev/cu.SLAB_USBtoUART', 9600, timeout=1)
         while self._running:
             if ser.in_waiting:
-                line = ser.readline().decode().strip()
+                line = ser.readline().decode('utf-8').strip()
                 try:
-                    values = list(map(int, line.split(',')))
-                    if len(values) == 3:
-                        self.new_data.emit(*values)
-                        if self.recordingStarted:
-                            self.recordedData.append(values)
+                    num = int(line)
+                    self.new_data.emit(num, num, num)
+                    if self.recordingStarted:
+                        self.recordedData.append([num, num, num])
+                        # print(line)
+                    if self.record_rest:
+                        self.restData.append([num, num, num])
+                    if self.record_motion:
+                        self.motionData.append([num, num, num])
+                    # values = list(map(int, line.split(',')))
+                    # if len(values) == 3:
+                    #     self.new_data.emit(*values)
+                    #     if self.recordingStarted:
+                    #         self.recordedData.append(values)
+                    #     if self.record_rest:
+                    #         self.restData.append(values)
+                    #     if self.record_motion:
+                    #         self.motionData.append(values)
                 except Exception as e:
                     print(f"Error: {e}")
 
@@ -89,6 +120,11 @@ class LiveGraph(QtWidgets.QMainWindow):
         self.toggle_source_btn.clicked.connect(self.toggle_data_source)
         control_layout.addWidget(self.toggle_source_btn)
         
+        self.calibrating = False
+        self.calibration_btn = QtWidgets.QPushButton("Learn")
+        self.calibration_btn.clicked.connect(self.toggle_calibration)
+        control_layout.addWidget(self.calibration_btn)
+
         self.source_label = QtWidgets.QLabel("Current Source: Dummy Data")
         control_layout.addWidget(self.source_label)
         
@@ -144,6 +180,9 @@ class LiveGraph(QtWidgets.QMainWindow):
         self.frame_count = 0
         self.cur_time = time.time()
 
+    # def toggle_trail(self):
+    #     was_in_trail = self.
+
     def toggle_data_source(self):
         was_recording = self.data_generator.recordingStarted
         if was_recording:
@@ -162,6 +201,95 @@ class LiveGraph(QtWidgets.QMainWindow):
         self.source_label.setText(f"Current Source: {source_text}")
         btn_text = "Switch to Serial Data" if new_mode else "Switch to Dummy Data"
         self.toggle_source_btn.setText(btn_text)
+
+
+    def update_flex_status(self, sequence):
+        if self.seq_index < len(sequence):
+            # phase toggles based on sequence index
+            if self.seq_index == 0:
+                # starting REST phase
+                self.data_generator.restData = []
+                self.data_generator.motionData = []
+                self.data_generator.record_rest = True
+                self.data_generator.record_motion = False
+                self.history_plot.clear()
+            elif self.seq_index == 5:
+                # starting MOTION phase
+                self.data_generator.record_rest = False
+                self.data_generator.record_motion = True
+            elif self.seq_index == 10:
+                # finishing MOTION, entering "Rest." message
+                self.data_generator.record_motion = False
+            self.status_label.setText(sequence[self.seq_index])
+            self.seq_index += 1
+        else:
+            self.timer.stop()
+            self.plot_history_data(self.data_generator.restData)
+            # save data
+            rest_path = './saves'
+            restname = time.strftime("%Y-%m-%d_%H-%M-rest.csv")
+            complete_rest = os.path.join(rest_path, restname)
+            rest_d = self.data_generator.restData
+            with open(complete_rest, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerows(rest_d)
+
+            motion_path = './saves'
+            motionname = time.strftime("%Y-%m-%d_%H-%M-motioin.csv")
+            complete_motion = os.path.join(motion_path, motionname)
+            motion_d = self.data_generator.motionData
+            with open(complete_motion, 'w', newline='') as f2:
+                writer = csv.writer(f2)
+                writer.writerows(motion_d)
+
+            # print(rest_d)
+            rest = [0, 0, 0]
+            motion = [0, 0, 0]
+            if (rest_d and motion_d):
+                for v in range(3):
+                    transposed_rest = list(map(list, zip(*rest_d)))
+                    transposed_motion = list(map(list, zip(*motion_d)))
+                    # print(transposed_motion)
+                    rest[v] = statistics.mean(transposed_rest[v])
+                    motion[v] = statistics.mean(transposed_motion[v])
+
+                self.data_generator.rest_threshold = rest
+                self.data_generator.motion_threshold = motion
+                print("rest_threshold:", self.data_generator.rest_threshold, "motion_threshold:", self.data_generator.motion_threshold)
+
+                self.data_generator.calibrated = True
+                historical_data = self.data_generator.restData.extend(self.data_generator.motionData)
+                self.plot_history_data(historical_data)
+
+
+
+    def toggle_calibration(self):
+        self.data_generator.record_rest= not self.data_generator.record_rest
+        self.data_generator.restData = []
+        self.data_generator.motionData = []
+        self.data_generator.record_rest = False
+        self.data_generator.record_motion = False
+
+        # at rest:
+        sequence = [
+            "Flex in 5",
+            "Flex in 4",
+            "Flex in 3",
+            "Flex in 2",
+            "Flex in 1",
+            "Flexing: (5)",
+            "Flexing: (4)",
+            "Flexing: (3)",
+            "Flexing: (2)",
+            "Flexing: (1)",
+            "Rest."
+        ]
+        self.seq_index = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(lambda: self.update_flex_status(sequence))
+        self.timer.start(1000)
+
+    
 
     def toggle_recording(self):
         self.data_generator.recordingStarted = not self.data_generator.recordingStarted
@@ -227,6 +355,13 @@ class LiveGraph(QtWidgets.QMainWindow):
 
         self.history_plot.addLegend()
         self.history_plot_segments+=1
+
+        if self.data_generator.calibrated:
+            self.history_plot.addLine(y = self.data_generator.rest_threshold[0], pen='b')
+            self.history_plot.addLine(y = self.data_generator.motion_threshold[0], pen='r')
+
+
+
 
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_1:

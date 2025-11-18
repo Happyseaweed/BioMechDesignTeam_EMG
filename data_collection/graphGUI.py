@@ -51,6 +51,7 @@ class LiveGraph(QtWidgets.QMainWindow):
         self.data_generator.new_data.connect(self.update_label)
         self.data_generator.start()
 
+
         self.GUI()
 
     def GUI(self):
